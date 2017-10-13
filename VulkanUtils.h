@@ -7,16 +7,18 @@
 namespace vks {
 
 std::vector<VkExtensionProperties> GetVkExtensions();
-const VkExtensionProperties* FindVKExtension(std::vector<VkExtensionProperties> &availableVKExtensions, const char* neededExtension);
+const VkExtensionProperties* FindVkExtension(std::vector<VkExtensionProperties> &availableVKExtensions, const char* neededExtension);
 
-bool CheckVKValidationLayerSupport(const char* const* layers, size_t layersCount);
+bool CheckVkValidationLayerSupport(const std::vector<const char*> &requestedLayers);
 
-VkResult CreateVKDebugReportCallbackEXT(
+VkResult CreateVkDebugReportCallbackEXT(
   VkInstance instance,
   const VkDebugReportCallbackCreateInfoEXT* pCreateInfo,
   const VkAllocationCallbacks* pAllocator,
   VkDebugReportCallbackEXT* pCallback);
 
-void DestroyVKDebugReportCallbackEXT(VkInstance instance, VkDebugReportCallbackEXT callback, const VkAllocationCallbacks* pAllocator);
+void DestroyVkDebugReportCallbackEXT(VkInstance instance, VkDebugReportCallbackEXT callback, const VkAllocationCallbacks* pAllocator);
+
+std::vector<VkQueueFamilyProperties> GetVkFamiliesOfDevice(const VkPhysicalDevice &device);
 
 }

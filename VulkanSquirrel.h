@@ -20,6 +20,14 @@ struct VulkanSquirrelOptions {
   int windowHeight;
 };
 
+enum VulkanSquirrelErrorCodes {
+  kGLFWWindowCouldNotBeCreated = 1000,
+  kVKRequiredExtensionNotAvailable = 2000,
+  kVKFailedToCreateInstance = 2001,
+  kVKNoCompatibleGPUAvailable = 2002,
+  kVKFailedToCreateVulkanLogicalDevice = 2003
+};
+
 class VulkanSquirrel
 {
   public:
@@ -27,5 +35,3 @@ class VulkanSquirrel
 };
 
 } // namespace VKS
-
-

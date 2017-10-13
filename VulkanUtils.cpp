@@ -16,7 +16,7 @@ std::vector<VkExtensionProperties> GetVkExtensions() {
   return extensions;
 }
 
-const VkExtensionProperties* FindVKExtension(std::vector<VkExtensionProperties> &availableVKExtensions, const char* neededExtension) {
+const VkExtensionProperties* FindVkExtension(std::vector<VkExtensionProperties> &availableVKExtensions, const char* neededExtension) {
   for (const auto& availableExtension : availableVKExtensions) {
 
     if (strcmp(availableExtension.extensionName, neededExtension) == 0) {
@@ -27,18 +27,18 @@ const VkExtensionProperties* FindVKExtension(std::vector<VkExtensionProperties> 
   return nullptr;
 }
 
-bool CheckVKValidationLayerSupport(const char* const* layers, size_t layersCount) {
+bool CheckVkValidationLayerSupport(const std::vector<const char*> &requestedLayers) {
   uint32_t layerCount;
   vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
 
   std::vector<VkLayerProperties> availableLayers(layerCount);
   vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
 
-  for (int i = 0; i < layersCount; ++i) {
+  for (int i = 0; i < requestedLayers.size(); ++i) {
     bool layerFound = false;
 
     for (const auto& layerProperties : availableLayers) {
-      if (strcmp(layers[i], layerProperties.layerName) == 0) {
+      if (strcmp(requestedLayers[i], layerProperties.layerName) == 0) {
         layerFound = true;
         break;
       }
@@ -53,7 +53,7 @@ bool CheckVKValidationLayerSupport(const char* const* layers, size_t layersCount
 }
 
 
-VkResult CreateVKDebugReportCallbackEXT(VkInstance instance, const VkDebugReportCallbackCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugReportCallbackEXT* pCallback) {
+VkResult CreateVkDebugReportCallbackEXT(VkInstance instance, const VkDebugReportCallbackCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugReportCallbackEXT* pCallback) {
   auto func = (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugReportCallbackEXT");
   if (func != nullptr) {
     return func(instance, pCreateInfo, pAllocator, pCallback);
@@ -63,11 +63,22 @@ VkResult CreateVKDebugReportCallbackEXT(VkInstance instance, const VkDebugReport
   }
 }
 
-void DestroyVKDebugReportCallbackEXT(VkInstance instance, VkDebugReportCallbackEXT callback, const VkAllocationCallbacks* pAllocator) {
+void DestroyVkDebugReportCallbackEXT(VkInstance instance, VkDebugReportCallbackEXT callback, const VkAllocationCallbacks* pAllocator) {
   auto func = (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(instance, "vkDestroyDebugReportCallbackEXT");
   if (func != nullptr) {
     func(instance, callback, pAllocator);
   }
+}
+
+std::vector<VkQueueFamilyProperties> GetVkFamiliesOfDevice(const VkPhysicalDevice &device) {
+
+  uint32_t queueFamilyCount = 0;
+  vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+  std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+  vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+  return queueFamilies;
 }
 
 } // namespace vks
