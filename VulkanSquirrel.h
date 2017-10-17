@@ -16,6 +16,7 @@ enum VulkanValidationLayerMode {
 struct VulkanSquirrelOptions {
   VulkanValidationLayerMode vulkanValidationLayersMode;
   std::vector<const char*> vulkanValidationLayers;
+  std::vector<const char*> vulkanExtensions;
   int windowWidth;
   int windowHeight;
 };

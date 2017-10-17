@@ -1,6 +1,7 @@
 #include "VulkanUtils.h"
 
 #include <vector>
+#include <set>
 
 #include <vulkan\vulkan.hpp>
 
@@ -79,6 +80,24 @@ std::vector<VkQueueFamilyProperties> GetVkFamiliesOfDevice(const VkPhysicalDevic
   vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
 
   return queueFamilies;
+}
+
+bool CheckVkExtensionSupport(const VkPhysicalDevice &device, const std::vector<const char*> &extensions) {
+
+  uint32_t deviceExtensionCount;
+  vkEnumerateDeviceExtensionProperties(device, nullptr, &deviceExtensionCount, nullptr);
+
+  std::vector<VkExtensionProperties> deviceAvailableExtensions(deviceExtensionCount);
+  vkEnumerateDeviceExtensionProperties(device, nullptr, &deviceExtensionCount, deviceAvailableExtensions.data());
+
+  //making a std::string allows the comparison in .erase to work
+  std::set<std::string> requiredExtensions(extensions.begin(), extensions.end());
+
+  for (const auto& extension : deviceAvailableExtensions) {
+    requiredExtensions.erase(extension.extensionName);
+  }
+
+  return requiredExtensions.empty();
 }
 
 } // namespace vks

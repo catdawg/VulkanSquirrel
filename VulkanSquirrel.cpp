@@ -130,12 +130,12 @@ tsk::TaskResult taskInitVulkanInstance(
     extensions[i] = data.extensions[i].extensionName;
   }
 
-  createInfo.enabledExtensionCount = (uint32_t)extensions.size();
+  createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
   createInfo.ppEnabledExtensionNames = extensions.data();
 
 
   if (data.options.vulkanValidationLayersMode == kEnabledVulkanValidationLayers && enableValidationLayersAfterCheck) {
-    createInfo.enabledLayerCount = (uint32_t)data.options.vulkanValidationLayers.size();
+    createInfo.enabledLayerCount = static_cast<uint32_t>(data.options.vulkanValidationLayers.size());
     createInfo.ppEnabledLayerNames = data.options.vulkanValidationLayers.data();
   }
   else {
@@ -226,7 +226,7 @@ int findSuitableVKQueue(const VkPhysicalDevice &device, const VkSurfaceKHR &surf
   return -1;
 }
 
-bool isVKDeviceSuitable(const VkPhysicalDevice &device, const VkSurfaceKHR &surface) {
+bool isVKDeviceSuitable(const VkPhysicalDevice &device, const VkSurfaceKHR &surface, const std::vector<const char*> &extensions) {
 
   VkPhysicalDeviceProperties deviceProperties;
   vkGetPhysicalDeviceProperties(device, &deviceProperties);
@@ -236,6 +236,10 @@ bool isVKDeviceSuitable(const VkPhysicalDevice &device, const VkSurfaceKHR &surf
   //vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
 
   if (deviceProperties.deviceType != VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+    return false;
+  }
+
+  if (!CheckVkExtensionSupport(device, extensions)) {
     return false;
   }
 
@@ -251,7 +255,7 @@ tsk::TaskResult taskPickVulkanPhysicalDevice(VulkanSquirrelData &data) {
   VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
   vkEnumeratePhysicalDevices(data.instance, &deviceCount, devices.data());
   for (const auto& device : devices) {
-    if (isVKDeviceSuitable(device, data.surface)) {
+    if (isVKDeviceSuitable(device, data.surface, data.options.vulkanExtensions)) {
       data.physicalDevice = device;
       break;
     }
@@ -296,7 +300,8 @@ tsk::TaskResult taskCreateVulkanLogicalDevice(VulkanSquirrelData &data) {
 
   createInfo.pEnabledFeatures = &deviceFeatures;
 
-  createInfo.enabledExtensionCount = 0;
+  createInfo.enabledExtensionCount = static_cast<uint32_t>(data.options.vulkanExtensions.size());
+  createInfo.ppEnabledExtensionNames = data.options.vulkanExtensions.data();
 
   if (enableValidationLayersAfterCheck && data.options.vulkanValidationLayersMode == kEnabledVulkanValidationLayers) {
     createInfo.enabledLayerCount = static_cast<uint32_t>(data.options.vulkanValidationLayers.size());

@@ -21,4 +21,6 @@ void DestroyVkDebugReportCallbackEXT(VkInstance instance, VkDebugReportCallbackE
 
 std::vector<VkQueueFamilyProperties> GetVkFamiliesOfDevice(const VkPhysicalDevice &device);
 
+bool CheckVkExtensionSupport(const VkPhysicalDevice &device, const std::vector<const char*> &extensions);
+
 }
