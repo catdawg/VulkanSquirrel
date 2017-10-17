@@ -25,7 +25,9 @@ enum VulkanSquirrelErrorCodes {
   kVKRequiredExtensionNotAvailable = 2000,
   kVKFailedToCreateInstance = 2001,
   kVKNoCompatibleGPUAvailable = 2002,
-  kVKFailedToCreateVulkanLogicalDevice = 2003
+  kVKFailedToCreateVulkanPhysicalDevice = 2003,
+  kVKFailedToCreateVulkanLogicalDevice = 2004,
+  kVKFailedToCreateSurface = 2005
 };
 
 class VulkanSquirrel

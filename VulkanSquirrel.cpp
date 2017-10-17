@@ -16,12 +16,14 @@ namespace vks {
 struct VulkanSquirrelData {
   VulkanSquirrelOptions options;
 
-  GLFWwindow* window;
+  GLFWwindow* window = nullptr;
   std::vector<VkExtensionProperties> extensions;
-  VkInstance instance;
-  VkDebugReportCallbackEXT callbackDebugInstance;
-  VkPhysicalDevice physicalDevice;
-  VkDevice device;
+  VkInstance instance = VK_NULL_HANDLE;
+  VkDebugReportCallbackEXT callbackDebugInstance = VK_NULL_HANDLE;
+  VkSurfaceKHR surface = VK_NULL_HANDLE;
+  VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+  VkDevice device = VK_NULL_HANDLE;
+  VkQueue mainQueue = VK_NULL_HANDLE;
 };
 
 tsk::TaskResult taskInitGLFWWindow(
@@ -54,8 +56,6 @@ tsk::TaskResult taskCheckVulkanExtensions(
     std::cout << "\t" << availableExtension.extensionName << std::endl;
   }
 
-  auto enabledExtensions = std::make_unique<std::vector<VkExtensionProperties>>();
-
   unsigned int glfwExtensionCount = 0;
   const char** glfwExtensions;
 
@@ -71,7 +71,7 @@ tsk::TaskResult taskCheckVulkanExtensions(
     else {
       const char* extensionName = (*availableExtension).extensionName;
       std::cout << "\t" << extensionName << std::endl;
-      enabledExtensions->push_back(*availableExtension);
+      data.extensions.push_back(*availableExtension);
       return true;
     }
   };
@@ -133,6 +133,7 @@ tsk::TaskResult taskInitVulkanInstance(
   createInfo.enabledExtensionCount = (uint32_t)extensions.size();
   createInfo.ppEnabledExtensionNames = extensions.data();
 
+
   if (data.options.vulkanValidationLayersMode == kEnabledVulkanValidationLayers && enableValidationLayersAfterCheck) {
     createInfo.enabledLayerCount = (uint32_t)data.options.vulkanValidationLayers.size();
     createInfo.ppEnabledLayerNames = data.options.vulkanValidationLayers.data();
@@ -141,11 +142,15 @@ tsk::TaskResult taskInitVulkanInstance(
     createInfo.enabledLayerCount = 0;
   }
 
-  if (vkCreateInstance(&createInfo, nullptr, &data.instance) != VK_SUCCESS || data.instance == VK_NULL_HANDLE) {
+  VkResult result;
+  if ((result = vkCreateInstance(&createInfo, nullptr, &data.instance)) != VK_SUCCESS || data.instance == VK_NULL_HANDLE) {
+
+    std::stringstream errorStringStream;
+    errorStringStream << "Failed to create Vulkan instance with vk error code:" << result;
     return {
       false,
       kVKFailedToCreateInstance,
-      "Failed to create Vulkan instance"
+      errorStringStream.str()
     };
   }
   return tsk::kTaskSuccess;
@@ -175,17 +180,53 @@ tsk::TaskResult taskInitVulkanDebug(VulkanSquirrelData &data) {
   createInfo.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
   createInfo.pfnCallback = VKDebugOutputCallback;
 
-  VkDebugReportCallbackEXT callbackDebugInstance = VK_NULL_HANDLE;
-  if (CreateVkDebugReportCallbackEXT(data.instance, &createInfo, nullptr, &data.callbackDebugInstance) != VK_SUCCESS) {
+  VkResult result;
+  if ((result = CreateVkDebugReportCallbackEXT(data.instance, &createInfo, nullptr, &data.callbackDebugInstance)) != VK_SUCCESS) {
 
-    std::cerr << "Failed to set up vulkan debug callback!" << std::endl;
+    std::cerr << "Failed to set up vulkan debug callback with vk error code:" << result << std::endl;
     return tsk::kTaskSuccess; // failing here is not critical
   }
 
   return tsk::kTaskSuccess;
 }
 
-bool isVKDeviceSuitable(const VkPhysicalDevice &device) {
+tsk::TaskResult taskCreateVulkanSurface(VulkanSquirrelData &data) {
+
+  VkResult result;
+  if ((result = glfwCreateWindowSurface(data.instance, data.window, nullptr, &data.surface)) != VK_SUCCESS) {
+
+    std::stringstream errorStringStream;
+    errorStringStream << "Failed to create Vulkan surface with vk error code: " << result;
+    return {
+      false,
+      kVKFailedToCreateSurface,
+      errorStringStream.str()
+    };
+  }
+
+  return tsk::kTaskSuccess;
+}
+
+int findSuitableVKQueue(const VkPhysicalDevice &device, const VkSurfaceKHR &surface) {
+
+  std::vector<VkQueueFamilyProperties> queueFamilies = GetVkFamiliesOfDevice(device);
+
+  bool foundQueueWithGraphicsCapabilityAndPresentation = false;
+  for (int i = 0; i < queueFamilies.size(); ++i) {
+    const auto& queueFamily = queueFamilies[i];
+
+    VkBool32 presentSupport = false;
+    vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
+    if (presentSupport && queueFamily.queueCount > 0 && queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+bool isVKDeviceSuitable(const VkPhysicalDevice &device, const VkSurfaceKHR &surface) {
 
   VkPhysicalDeviceProperties deviceProperties;
   vkGetPhysicalDeviceProperties(device, &deviceProperties);
@@ -198,33 +239,19 @@ bool isVKDeviceSuitable(const VkPhysicalDevice &device) {
     return false;
   }
 
-  std::vector<VkQueueFamilyProperties> queueFamilies = GetVkFamiliesOfDevice(device);
-
-  bool foundQueueWithGraphicsCapability = false;
-  for (const auto& queueFamily : queueFamilies) {
-    if (queueFamily.queueCount > 0 && queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-      foundQueueWithGraphicsCapability = true;
-      break;
-    }
-  }
-
-  return foundQueueWithGraphicsCapability;
+  return findSuitableVKQueue(device, surface) != -1;
 }
 
 tsk::TaskResult taskPickVulkanPhysicalDevice(VulkanSquirrelData &data) {
   uint32_t deviceCount = 0;
   vkEnumeratePhysicalDevices(data.instance, &deviceCount, nullptr);
 
-  if (deviceCount == 0) {
-    throw std::runtime_error("failed to find GPUs with Vulkan support!");
-  }
-
   std::vector<VkPhysicalDevice> devices(deviceCount);
 
   VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
   vkEnumeratePhysicalDevices(data.instance, &deviceCount, devices.data());
   for (const auto& device : devices) {
-    if (isVKDeviceSuitable(device)) {
+    if (isVKDeviceSuitable(device, data.surface)) {
       data.physicalDevice = device;
       break;
     }
@@ -233,7 +260,7 @@ tsk::TaskResult taskPickVulkanPhysicalDevice(VulkanSquirrelData &data) {
   if (data.physicalDevice == VK_NULL_HANDLE) {
     return {
       false,
-      kGLFWWindowCouldNotBeCreated,
+      kVKFailedToCreateVulkanPhysicalDevice,
       "Failed to find a suitable GPU!"
     };
   }
@@ -250,27 +277,10 @@ tsk::TaskResult taskCreateVulkanLogicalDevice(VulkanSquirrelData &data) {
     enableValidationLayersAfterCheck = true;
   }
 
-  std::vector<VkQueueFamilyProperties> queueFamilies = GetVkFamiliesOfDevice(data.physicalDevice);
-
-  int indexOfGraphicsFamily = -1;
-  for (int i = 0; i < queueFamilies.size(); ++i) {
-    if (queueFamilies[i].queueCount > 0 && queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-      indexOfGraphicsFamily = i;
-      break;
-    }
-  }
-
-  if (indexOfGraphicsFamily == -1) {
-    return {
-      false,
-      kVKNoCompatibleGPUAvailable,
-      "Failed to find a suitable GPU!"
-    };
-  }
-
+  int queueFamily = findSuitableVKQueue(data.physicalDevice, data.surface);
   VkDeviceQueueCreateInfo queueCreateInfo = {};
   queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-  queueCreateInfo.queueFamilyIndex = indexOfGraphicsFamily;
+  queueCreateInfo.queueFamilyIndex = queueFamily;
   queueCreateInfo.queueCount = 1;
 
   float queuePriority = 1.0f;
@@ -296,7 +306,8 @@ tsk::TaskResult taskCreateVulkanLogicalDevice(VulkanSquirrelData &data) {
     createInfo.enabledLayerCount = 0;
   }
 
-  if (vkCreateDevice(data.physicalDevice, &createInfo, nullptr, &data.device) != VK_SUCCESS || data.device == VK_NULL_HANDLE) {
+  VkResult result;
+  if ((result = vkCreateDevice(data.physicalDevice, &createInfo, nullptr, &data.device)) != VK_SUCCESS || data.device == VK_NULL_HANDLE) {
 
     return {
       false,
@@ -304,6 +315,8 @@ tsk::TaskResult taskCreateVulkanLogicalDevice(VulkanSquirrelData &data) {
       "Failed to create Vulkan logical device!"
     };
   }
+
+  vkGetDeviceQueue(data.device, queueFamily, 0, &data.mainQueue);
 
   return tsk::kTaskSuccess;
 }
@@ -331,6 +344,9 @@ void VulkanSquirrel::Run(const VulkanSquirrelOptions &options) {
         "Initialize Vulkan Debug",
         taskInitVulkanDebug
       }, {
+        "Create Vulkan Surface",
+        taskCreateVulkanSurface
+      },{
         "Pick Vulkan Physical Device",
         taskPickVulkanPhysicalDevice
       }, {
@@ -351,6 +367,10 @@ void VulkanSquirrel::Run(const VulkanSquirrelOptions &options) {
 
   if (data.callbackDebugInstance != VK_NULL_HANDLE) {
     DestroyVkDebugReportCallbackEXT(data.instance, data.callbackDebugInstance, nullptr);
+  }
+
+  if (data.surface != VK_NULL_HANDLE) {
+    vkDestroySurfaceKHR(data.instance, data.surface, nullptr);
   }
 
   if (data.instance != VK_NULL_HANDLE) {
