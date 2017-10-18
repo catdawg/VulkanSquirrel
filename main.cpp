@@ -20,6 +20,10 @@ int main() {
     "VK_LAYER_LUNARG_standard_validation"
   };
 
+  options.vulkanExtensions = {
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME
+  };
+
   try {
     app.Run(options);
   }

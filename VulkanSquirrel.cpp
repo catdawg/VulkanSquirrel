@@ -12,18 +12,46 @@
 
 namespace vks {
 
-
 struct VulkanSquirrelData {
   VulkanSquirrelOptions options;
 
+  // created by taskInitGLFWWindow
   GLFWwindow* window = nullptr;
+
+  // created by taskCheckVulkanExtensions
   std::vector<VkExtensionProperties> extensions;
+
+  // created by taskInitVulkanInstance
   VkInstance instance = VK_NULL_HANDLE;
+
+  // created by taskInitVulkanDebug
   VkDebugReportCallbackEXT callbackDebugInstance = VK_NULL_HANDLE;
+
+  // created by taskCreateVulkanSurface
   VkSurfaceKHR surface = VK_NULL_HANDLE;
+
+  // created by taskCheckSurfaceCapabilities
+  VkSurfaceCapabilitiesKHR surfaceCapabilities;
+  std::vector<VkSurfaceFormatKHR> surfaceFormats;
+  std::vector<VkPresentModeKHR> surfacePresentModes;
+
+  // created by taskPickVulkanPhysicalDevice
   VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+
+  // created by taskCreateVulkanLogicalDevice
   VkDevice device = VK_NULL_HANDLE;
+  uint32_t queueFamilyIndex;
   VkQueue mainQueue = VK_NULL_HANDLE;
+
+  // created by taskCheckVulkanSurfaceCapabilities
+  VkSurfaceFormatKHR surfaceFormat;;
+  VkPresentModeKHR presentMode;;
+  VkExtent2D extent;
+
+  // created by taskCreateVulkanSwapChain
+  VkSwapchainKHR swapChain;
+  std::vector<VkImage> swapChainImages;
+  VkExtent2D swapChainExtent;
 };
 
 tsk::TaskResult taskInitGLFWWindow(
@@ -173,6 +201,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL VKDebugOutputCallback(
 }
 
 tsk::TaskResult taskInitVulkanDebug(VulkanSquirrelData &data) {
+
   if (data.options.vulkanValidationLayersMode == kNoVulkanValidationLayers) return tsk::kTaskSuccess;
 
   VkDebugReportCallbackCreateInfoEXT createInfo = {};
@@ -247,6 +276,7 @@ bool isVKDeviceSuitable(const VkPhysicalDevice &device, const VkSurfaceKHR &surf
 }
 
 tsk::TaskResult taskPickVulkanPhysicalDevice(VulkanSquirrelData &data) {
+
   uint32_t deviceCount = 0;
   vkEnumeratePhysicalDevices(data.instance, &deviceCount, nullptr);
 
@@ -281,10 +311,10 @@ tsk::TaskResult taskCreateVulkanLogicalDevice(VulkanSquirrelData &data) {
     enableValidationLayersAfterCheck = true;
   }
 
-  int queueFamily = findSuitableVKQueue(data.physicalDevice, data.surface);
+  data.queueFamilyIndex = findSuitableVKQueue(data.physicalDevice, data.surface);
   VkDeviceQueueCreateInfo queueCreateInfo = {};
   queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-  queueCreateInfo.queueFamilyIndex = queueFamily;
+  queueCreateInfo.queueFamilyIndex = data.queueFamilyIndex;
   queueCreateInfo.queueCount = 1;
 
   float queuePriority = 1.0f;
@@ -321,7 +351,125 @@ tsk::TaskResult taskCreateVulkanLogicalDevice(VulkanSquirrelData &data) {
     };
   }
 
-  vkGetDeviceQueue(data.device, queueFamily, 0, &data.mainQueue);
+  vkGetDeviceQueue(data.device, data.queueFamilyIndex, 0, &data.mainQueue);
+
+  return tsk::kTaskSuccess;
+}
+
+tsk::TaskResult taskCheckVulkanSurfaceCapabilities(VulkanSquirrelData &data) {
+
+  vkGetPhysicalDeviceSurfaceCapabilitiesKHR(data.physicalDevice, data.surface, &data.surfaceCapabilities);
+
+  uint32_t formatCount;
+  vkGetPhysicalDeviceSurfaceFormatsKHR(data.physicalDevice, data.surface, &formatCount, nullptr);
+
+  if (formatCount != 0) {
+    data.surfaceFormats.resize(formatCount);
+    vkGetPhysicalDeviceSurfaceFormatsKHR(data.physicalDevice, data.surface, &formatCount, data.surfaceFormats.data());
+  }
+
+  uint32_t presentModeCount;
+  vkGetPhysicalDeviceSurfacePresentModesKHR(data.physicalDevice, data.surface, &presentModeCount, nullptr);
+
+  if (presentModeCount != 0) {
+    data.surfacePresentModes.resize(presentModeCount);
+    vkGetPhysicalDeviceSurfacePresentModesKHR(data.physicalDevice, data.surface, &presentModeCount, data.surfacePresentModes.data());
+  }
+
+  return tsk::kTaskSuccess;
+}
+
+VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR> availablePresentModes) {
+  VkPresentModeKHR bestMode = VK_PRESENT_MODE_FIFO_KHR;
+
+  for (const auto& availablePresentMode : availablePresentModes) {
+    if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+      return availablePresentMode;
+    }
+    else if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+      bestMode = availablePresentMode;
+    }
+  }
+
+  return bestMode;
+}
+
+VkExtent2D chooseSwapExtent(const uint32_t &width, const uint32_t &height, const VkSurfaceCapabilitiesKHR& capabilities) {
+  if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+    return capabilities.currentExtent;
+  }
+  else {
+    VkExtent2D actualExtent = { width, height };
+
+    actualExtent.width = std::max(capabilities.minImageExtent.width, std::min(capabilities.maxImageExtent.width, actualExtent.width));
+    actualExtent.height = std::max(capabilities.minImageExtent.height, std::min(capabilities.maxImageExtent.height, actualExtent.height));
+
+    return actualExtent;
+  }
+}
+
+VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
+  if (availableFormats.size() == 1 && availableFormats[0].format == VK_FORMAT_UNDEFINED) {
+    return { VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+  }
+
+  for (const auto& availableFormat : availableFormats) {
+    if (availableFormat.format == VK_FORMAT_B8G8R8A8_UNORM && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+      return availableFormat;
+    }
+  }
+
+  return availableFormats[0];
+}
+
+tsk::TaskResult taskCreateVulkanSwapChain(VulkanSquirrelData &data) {
+
+  data.surfaceFormat = chooseSwapSurfaceFormat(data.surfaceFormats);
+  data.presentMode = chooseSwapPresentMode(data.surfacePresentModes);
+  data.swapChainExtent = chooseSwapExtent(data.options.windowWidth, data.options.windowHeight, data.surfaceCapabilities);
+
+  // we try one more than minimum to implement triple buffering
+  uint32_t imageCount = data.surfaceCapabilities.minImageCount + 1;
+  if (data.surfaceCapabilities.maxImageCount > 0 && imageCount > data.surfaceCapabilities.maxImageCount) {
+    imageCount = data.surfaceCapabilities.maxImageCount;
+  }
+
+  VkSwapchainCreateInfoKHR createInfo = {};
+  createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+  createInfo.surface = data.surface;
+
+  createInfo.minImageCount = imageCount;
+  createInfo.imageFormat = data.surfaceFormat.format;
+  createInfo.imageColorSpace = data.surfaceFormat.colorSpace;
+  createInfo.imageExtent = data.swapChainExtent;
+  createInfo.imageArrayLayers = 1;
+  createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+  createInfo.pQueueFamilyIndices = &data.queueFamilyIndex;
+  createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+  createInfo.preTransform = data.surfaceCapabilities.currentTransform;
+  createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  createInfo.presentMode = data.presentMode;
+  createInfo.clipped = VK_TRUE;
+
+  createInfo.oldSwapchain = VK_NULL_HANDLE;
+
+  VkResult result;
+  if ((result = vkCreateSwapchainKHR(data.device, &createInfo, nullptr, &data.swapChain)) != VK_SUCCESS) {
+
+    std::stringstream errorStringStream;
+    errorStringStream << "Failed to create Vulkan swap chain with vk error code: " << result;
+    return {
+      false,
+      kVKFailedToCreateVulkanSwapChain,
+      errorStringStream.str()
+    };
+  }
+
+  vkGetSwapchainImagesKHR(data.device, data.swapChain, &imageCount, nullptr);
+  data.swapChainImages.resize(imageCount);
+  vkGetSwapchainImagesKHR(data.device, data.swapChain, &imageCount, data.swapChainImages.data());
 
   return tsk::kTaskSuccess;
 }
@@ -357,6 +505,12 @@ void VulkanSquirrel::Run(const VulkanSquirrelOptions &options) {
       }, {
         "Create Vulkan Logical Device",
         taskCreateVulkanLogicalDevice
+      }, {
+        "Checking Vulkan Swap Chain Capabilities",
+        taskCheckVulkanSurfaceCapabilities
+      }, {
+        "Create Vulkan Swap Chain",
+        taskCreateVulkanSwapChain
       }
     }
   );
@@ -365,6 +519,10 @@ void VulkanSquirrel::Run(const VulkanSquirrelOptions &options) {
   while (!glfwWindowShouldClose(data.window)) {
     glfwPollEvents();
   } // the loop
+
+  if (data.swapChain != VK_NULL_HANDLE) {
+    vkDestroySwapchainKHR(data.device, data.swapChain, nullptr);
+  }
 
   if (data.device != VK_NULL_HANDLE) {
     vkDestroyDevice(data.device, nullptr);
