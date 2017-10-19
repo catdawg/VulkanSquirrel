@@ -1,6 +1,7 @@
 #include "VulkanSquirrel.h"
 
 #include <iostream>
+#include <fstream>
 #include <functional>
 #include <stdexcept>
 #include <sstream>
@@ -44,19 +45,21 @@ struct VulkanSquirrelData {
   VkQueue mainQueue = VK_NULL_HANDLE;
 
   // created by taskCheckVulkanSurfaceCapabilities
-  VkSurfaceFormatKHR surfaceFormat;;
-  VkPresentModeKHR presentMode;;
+  VkSurfaceFormatKHR surfaceFormat;
+  VkPresentModeKHR presentMode;
   VkExtent2D extent;
 
   // created by taskCreateVulkanSwapChain
-  VkSwapchainKHR swapChain;
+  VkSwapchainKHR swapChain = VK_NULL_HANDLE;
   std::vector<VkImage> swapChainImages;
   VkExtent2D swapChainExtent;
+
+  // created by taskCreateVulkanDefaultPipeline
+  VkShaderModule vertShaderModule = VK_NULL_HANDLE;
+  VkShaderModule fragShaderModule = VK_NULL_HANDLE;
 };
 
-tsk::TaskResult taskInitGLFWWindow(
-  VulkanSquirrelData &data
-) {
+tsk::TaskResult taskInitGLFWWindow(VulkanSquirrelData &data) {
   glfwInit();
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
@@ -73,9 +76,7 @@ tsk::TaskResult taskInitGLFWWindow(
   return tsk::kTaskSuccess;
 }
 
-tsk::TaskResult taskCheckVulkanExtensions(
-  VulkanSquirrelData &data
-) {
+tsk::TaskResult taskCheckVulkanExtensions(VulkanSquirrelData &data) {
   std::vector<VkExtensionProperties> availableExtensions = GetVkExtensions();
 
   std::cout << "available extensions:" << std::endl;
@@ -127,9 +128,7 @@ tsk::TaskResult taskCheckVulkanExtensions(
   return tsk::kTaskSuccess;
 }
 
-tsk::TaskResult taskInitVulkanInstance(
-    VulkanSquirrelData &data
-) {
+tsk::TaskResult taskInitVulkanInstance(VulkanSquirrelData &data) {
   bool enableValidationLayersAfterCheck = true;
   if (
       data.options.vulkanValidationLayersMode == kEnabledVulkanValidationLayers && 
@@ -474,6 +473,90 @@ tsk::TaskResult taskCreateVulkanSwapChain(VulkanSquirrelData &data) {
   return tsk::kTaskSuccess;
 }
 
+bool readFile(const std::string& filename, std::vector<char> &output)  {
+  std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+  if (!file.is_open()) {
+    return false;
+  }
+
+  size_t fileSize = (size_t)file.tellg();
+  output.resize(fileSize);
+
+  file.seekg(0);
+  file.read(output.data(), fileSize);
+
+  file.close();
+
+  return true;
+}
+
+tsk::TaskResult taskCreateVulkanDefaultPipeline(VulkanSquirrelData &data) {
+
+  std::vector<char> vertShaderCode;
+  std::vector<char> fragShaderCode;
+
+  if (!readFile("./Assets/test.vert.spv", vertShaderCode)) {
+    return {
+      false,
+      kVKFailedToReadDefaultVulkanVertShader,
+      "Failed to read default Vulkan vert shader"
+    };
+  }
+
+  if (!readFile("./Assets/test.frag.spv", fragShaderCode)) {
+    return {
+      false,
+      kVKFailedToReadDefaultVulkanFragShader,
+      "Failed to read default Vulkan frag shader"
+    };
+  }
+
+  {
+    VkResult vertResult = createVkShaderModule(data.device, vertShaderCode, data.vertShaderModule);
+    if (vertResult != VK_SUCCESS) {
+
+      std::stringstream errorStringStream;
+      errorStringStream << "Failed to create Vulkan default vert shader module with vk error code: " << vertResult;
+      return {
+        false,
+        kVKFailedToCreateDefaultVulkanVertShaderModule,
+        errorStringStream.str()
+      };
+    }
+  }
+
+  {
+    VkResult fragResult = createVkShaderModule(data.device, fragShaderCode, data.fragShaderModule);
+    if (fragResult != VK_SUCCESS) {
+
+      std::stringstream errorStringStream;
+      errorStringStream << "Failed to create Vulkan default frag shader module with vk error code: " << fragResult;
+      return {
+        false,
+        kVKFailedToCreateDefaultVulkanFragShaderModule,
+        errorStringStream.str()
+      };
+    }
+  }
+
+  VkPipelineShaderStageCreateInfo vertShaderStageInfo = {};
+  vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+  vertShaderStageInfo.module = data.vertShaderModule;
+  vertShaderStageInfo.pName = "main";
+
+  VkPipelineShaderStageCreateInfo fragShaderStageInfo = {};
+  fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+  fragShaderStageInfo.module = data.fragShaderModule;
+  fragShaderStageInfo.pName = "main";
+
+  VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+
+  return tsk::kTaskSuccess;
+}
+
 void VulkanSquirrel::Run(const VulkanSquirrelOptions &options) {
 
   VulkanSquirrelData data;
@@ -511,6 +594,9 @@ void VulkanSquirrel::Run(const VulkanSquirrelOptions &options) {
       }, {
         "Create Vulkan Swap Chain",
         taskCreateVulkanSwapChain
+      }, {
+        "Create Vulkan Default Pipeline",
+        taskCreateVulkanDefaultPipeline
       }
     }
   );
@@ -520,23 +606,33 @@ void VulkanSquirrel::Run(const VulkanSquirrelOptions &options) {
     glfwPollEvents();
   } // the loop
 
-  if (data.swapChain != VK_NULL_HANDLE) {
-    vkDestroySwapchainKHR(data.device, data.swapChain, nullptr);
-  }
-
   if (data.device != VK_NULL_HANDLE) {
+
+    if (data.fragShaderModule != VK_NULL_HANDLE) {
+      vkDestroyShaderModule(data.device, data.fragShaderModule, nullptr);
+    }
+
+    if (data.vertShaderModule != VK_NULL_HANDLE) {
+      vkDestroyShaderModule(data.device, data.vertShaderModule, nullptr);
+    }
+
+    if (data.swapChain != VK_NULL_HANDLE) {
+      vkDestroySwapchainKHR(data.device, data.swapChain, nullptr);
+    }
+
     vkDestroyDevice(data.device, nullptr);
   }
 
-  if (data.callbackDebugInstance != VK_NULL_HANDLE) {
-    DestroyVkDebugReportCallbackEXT(data.instance, data.callbackDebugInstance, nullptr);
-  }
-
-  if (data.surface != VK_NULL_HANDLE) {
-    vkDestroySurfaceKHR(data.instance, data.surface, nullptr);
-  }
-
   if (data.instance != VK_NULL_HANDLE) {
+
+    if (data.callbackDebugInstance != VK_NULL_HANDLE) {
+      DestroyVkDebugReportCallbackEXT(data.instance, data.callbackDebugInstance, nullptr);
+    }
+
+    if (data.surface != VK_NULL_HANDLE) {
+      vkDestroySurfaceKHR(data.instance, data.surface, nullptr);
+    }
+
     vkDestroyInstance(data.instance, nullptr);
   }
 

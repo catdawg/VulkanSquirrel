@@ -23,4 +23,6 @@ std::vector<VkQueueFamilyProperties> GetVkFamiliesOfDevice(const VkPhysicalDevic
 
 bool CheckVkExtensionSupport(const VkPhysicalDevice &device, const std::vector<const char*> &extensions);
 
+VkResult createVkShaderModule(const VkDevice &device, const std::vector<char>& code, VkShaderModule &output);
+
 }

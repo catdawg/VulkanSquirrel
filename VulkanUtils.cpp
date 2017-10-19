@@ -100,4 +100,14 @@ bool CheckVkExtensionSupport(const VkPhysicalDevice &device, const std::vector<c
   return requiredExtensions.empty();
 }
 
+VkResult createVkShaderModule(const VkDevice &device, const std::vector<char>& code, VkShaderModule &output) {
+
+  VkShaderModuleCreateInfo createInfo = {};
+  createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+  createInfo.codeSize = code.size();
+  createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+
+  return vkCreateShaderModule(device, &createInfo, nullptr, &output);
+}
+
 } // namespace vks

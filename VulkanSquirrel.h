@@ -29,7 +29,11 @@ enum VulkanSquirrelErrorCodes {
   kVKFailedToCreateVulkanPhysicalDevice = 2003,
   kVKFailedToCreateVulkanLogicalDevice = 2004,
   kVKFailedToCreateSurface = 2005,
-  kVKFailedToCreateVulkanSwapChain = 2006
+  kVKFailedToCreateVulkanSwapChain = 2006,
+  kVKFailedToReadDefaultVulkanVertShader = 2007,
+  kVKFailedToReadDefaultVulkanFragShader = 2008,
+  kVKFailedToCreateDefaultVulkanFragShaderModule = 2009,
+  kVKFailedToCreateDefaultVulkanVertShaderModule = 2010,
 };
 
 class VulkanSquirrel
