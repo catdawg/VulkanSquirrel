@@ -41,7 +41,7 @@ struct VulkanSquirrelData {
 
   // created by taskCreateVulkanLogicalDevice
   VkDevice device = VK_NULL_HANDLE;
-  uint32_t queueFamilyIndex;
+  uint32_t mainQueueFamilyIndex;
   VkQueue mainQueue = VK_NULL_HANDLE;
 
   // created by taskCheckVulkanSurfaceCapabilities
@@ -54,9 +54,30 @@ struct VulkanSquirrelData {
   std::vector<VkImage> swapChainImages;
   VkExtent2D swapChainExtent;
 
+  // created by taskCreateVulkanSwapChainImageViews
+  std::vector<VkImageView> swapChainImageViews;
+
+  // create by taskCreateVulkanDefaultRenderPass
+  VkRenderPass defaultRenderPass;
+
   // created by taskCreateVulkanDefaultPipeline
   VkShaderModule vertShaderModule = VK_NULL_HANDLE;
   VkShaderModule fragShaderModule = VK_NULL_HANDLE;
+  VkPipelineLayout defaultPipelineLayout = VK_NULL_HANDLE;
+  VkPipeline defaultGraphicsPipeline = VK_NULL_HANDLE;
+
+  // created by taskCreateVulkanDefaultFramebuffers
+  std::vector<VkFramebuffer> swapChainFramebuffers;
+
+  // created by taskCreateVulkanCommandPool
+  VkCommandPool commandPool;
+
+  // created by taskCreateVulkanCommandBuffers
+  std::vector<VkCommandBuffer> commandBuffers;
+
+  // created by taskCreateVulkanSemaphores
+  VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
+  VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
 };
 
 tsk::TaskResult taskInitGLFWWindow(VulkanSquirrelData &data) {
@@ -131,8 +152,8 @@ tsk::TaskResult taskCheckVulkanExtensions(VulkanSquirrelData &data) {
 tsk::TaskResult taskInitVulkanInstance(VulkanSquirrelData &data) {
   bool enableValidationLayersAfterCheck = true;
   if (
-      data.options.vulkanValidationLayersMode == kEnabledVulkanValidationLayers && 
-      !CheckVkValidationLayerSupport(data.options.vulkanValidationLayers)
+    data.options.vulkanValidationLayersMode == kEnabledVulkanValidationLayers &&
+    !CheckVkValidationLayerSupport(data.options.vulkanValidationLayers)
     ) {
     std::cerr << "Vulkan validation layer requested, but not available!";
     enableValidationLayersAfterCheck = false;
@@ -182,7 +203,6 @@ tsk::TaskResult taskInitVulkanInstance(VulkanSquirrelData &data) {
   }
   return tsk::kTaskSuccess;
 }
-
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL VKDebugOutputCallback(
   VkDebugReportFlagsEXT flags,
@@ -310,10 +330,10 @@ tsk::TaskResult taskCreateVulkanLogicalDevice(VulkanSquirrelData &data) {
     enableValidationLayersAfterCheck = true;
   }
 
-  data.queueFamilyIndex = findSuitableVKQueue(data.physicalDevice, data.surface);
+  data.mainQueueFamilyIndex = findSuitableVKQueue(data.physicalDevice, data.surface);
   VkDeviceQueueCreateInfo queueCreateInfo = {};
   queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-  queueCreateInfo.queueFamilyIndex = data.queueFamilyIndex;
+  queueCreateInfo.queueFamilyIndex = data.mainQueueFamilyIndex;
   queueCreateInfo.queueCount = 1;
 
   float queuePriority = 1.0f;
@@ -350,7 +370,7 @@ tsk::TaskResult taskCreateVulkanLogicalDevice(VulkanSquirrelData &data) {
     };
   }
 
-  vkGetDeviceQueue(data.device, data.queueFamilyIndex, 0, &data.mainQueue);
+  vkGetDeviceQueue(data.device, data.mainQueueFamilyIndex, 0, &data.mainQueue);
 
   return tsk::kTaskSuccess;
 }
@@ -444,7 +464,7 @@ tsk::TaskResult taskCreateVulkanSwapChain(VulkanSquirrelData &data) {
   createInfo.imageArrayLayers = 1;
   createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
-  createInfo.pQueueFamilyIndices = &data.queueFamilyIndex;
+  createInfo.pQueueFamilyIndices = &data.mainQueueFamilyIndex;
   createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
   createInfo.preTransform = data.surfaceCapabilities.currentTransform;
@@ -473,7 +493,45 @@ tsk::TaskResult taskCreateVulkanSwapChain(VulkanSquirrelData &data) {
   return tsk::kTaskSuccess;
 }
 
-bool readFile(const std::string& filename, std::vector<char> &output)  {
+tsk::TaskResult taskCreateVulkanSwapChainImageViews(VulkanSquirrelData &data) {
+  data.swapChainImageViews.resize(data.swapChainImages.size(), VK_NULL_HANDLE);
+
+  for (size_t i = 0; i < data.swapChainImages.size(); i++) {
+    VkImageViewCreateInfo createInfo = {};
+    createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    createInfo.image = data.swapChainImages[i];
+
+    createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    createInfo.format = data.surfaceFormat.format;
+
+    createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+    createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+
+    createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    createInfo.subresourceRange.baseMipLevel = 0;
+    createInfo.subresourceRange.levelCount = 1;
+    createInfo.subresourceRange.baseArrayLayer = 0;
+    createInfo.subresourceRange.layerCount = 1;
+
+    VkResult result;
+    if ((result = vkCreateImageView(data.device, &createInfo, nullptr, &data.swapChainImageViews[i])) != VK_SUCCESS) {
+
+      std::stringstream errorStringStream;
+      errorStringStream << "Failed to create Vulkan swap chain image view with vk error code: " << result;
+      return {
+        false,
+        kVKFailedToCreateVulkanSwapChainImageView,
+        errorStringStream.str()
+      };
+    }
+  }
+
+  return tsk::kTaskSuccess;
+}
+
+bool readFile(const std::string& filename, std::vector<char> &output) {
   std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
   if (!file.is_open()) {
@@ -489,6 +547,66 @@ bool readFile(const std::string& filename, std::vector<char> &output)  {
   file.close();
 
   return true;
+}
+
+tsk::TaskResult taskCreateVulkanDefaultRenderPass(VulkanSquirrelData &data) {
+
+  VkAttachmentDescription colorAttachment = {};
+  colorAttachment.format = data.surfaceFormat.format;
+  colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+
+  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+  colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
+  colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+  VkAttachmentReference colorAttachmentRef = {};
+  colorAttachmentRef.attachment = 0;
+  colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+  VkSubpassDescription subpass = {};
+  subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+
+  subpass.colorAttachmentCount = 1;
+  subpass.pColorAttachments = &colorAttachmentRef;
+
+  VkRenderPassCreateInfo renderPassInfo = {};
+  renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+  renderPassInfo.attachmentCount = 1;
+  renderPassInfo.pAttachments = &colorAttachment;
+  renderPassInfo.subpassCount = 1;
+  renderPassInfo.pSubpasses = &subpass;
+
+  VkSubpassDependency dependency = {};
+  dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+  dependency.dstSubpass = 0;
+
+  dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  dependency.srcAccessMask = 0;
+
+  dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+  renderPassInfo.dependencyCount = 1;
+  renderPassInfo.pDependencies = &dependency;
+
+  VkResult result;
+  if ((result = vkCreateRenderPass(data.device, &renderPassInfo, nullptr, &data.defaultRenderPass)) != VK_SUCCESS) {
+
+    std::stringstream errorStringStream;
+    errorStringStream << "Failed to create Vulkan render pass with vk error code: " << result;
+    return {
+      false,
+      kVKFailedToCreateDefaultVulkanRenderPass,
+      errorStringStream.str()
+    };
+  }
+
+  return tsk::kTaskSuccess;
 }
 
 tsk::TaskResult taskCreateVulkanDefaultPipeline(VulkanSquirrelData &data) {
@@ -554,6 +672,309 @@ tsk::TaskResult taskCreateVulkanDefaultPipeline(VulkanSquirrelData &data) {
 
   VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
 
+  VkPipelineVertexInputStateCreateInfo vertexInputInfo = {};
+  vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+  vertexInputInfo.vertexBindingDescriptionCount = 0;
+  vertexInputInfo.pVertexBindingDescriptions = nullptr; // Optional
+  vertexInputInfo.vertexAttributeDescriptionCount = 0;
+  vertexInputInfo.pVertexAttributeDescriptions = nullptr; // Optional
+
+  VkPipelineInputAssemblyStateCreateInfo inputAssembly = {};
+  inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+  inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+  VkViewport viewport = {};
+  viewport.x = 0.0f;
+  viewport.y = 0.0f;
+  viewport.width = static_cast<float>(data.swapChainExtent.width);
+  viewport.height = static_cast<float>(data.swapChainExtent.height);
+  viewport.minDepth = 0.0f;
+  viewport.maxDepth = 1.0f;
+
+  VkRect2D scissor = {};
+  scissor.offset = { 0, 0 };
+  scissor.extent = data.swapChainExtent;
+
+  VkPipelineViewportStateCreateInfo viewportState = {};
+  viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+  viewportState.viewportCount = 1;
+  viewportState.pViewports = &viewport;
+  viewportState.scissorCount = 1;
+  viewportState.pScissors = &scissor;
+
+  VkPipelineRasterizationStateCreateInfo rasterizer = {};
+  rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+  rasterizer.depthClampEnable = VK_FALSE;
+
+  rasterizer.rasterizerDiscardEnable = VK_FALSE;
+
+  rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+
+  rasterizer.lineWidth = 1.0f;
+
+  rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+  rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+
+  rasterizer.depthBiasEnable = VK_FALSE;
+  rasterizer.depthBiasConstantFactor = 0.0f; // Optional
+  rasterizer.depthBiasClamp = 0.0f; // Optional
+  rasterizer.depthBiasSlopeFactor = 0.0f; // Optional
+
+  VkPipelineMultisampleStateCreateInfo multisampling = {};
+  multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+  multisampling.sampleShadingEnable = VK_FALSE;
+  multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+  multisampling.minSampleShading = 1.0f; // Optional
+  multisampling.pSampleMask = nullptr; // Optional
+  multisampling.alphaToCoverageEnable = VK_FALSE; // Optional
+  multisampling.alphaToOneEnable = VK_FALSE; // Optional
+
+  VkPipelineColorBlendAttachmentState colorBlendAttachment = {};
+  colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+  colorBlendAttachment.blendEnable = VK_FALSE;
+  colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE; // Optional
+  colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO; // Optional
+  colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD; // Optional
+  colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE; // Optional
+  colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO; // Optional
+  colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD; // Optional
+
+  VkPipelineColorBlendStateCreateInfo colorBlending = {};
+  colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+  colorBlending.logicOpEnable = VK_FALSE;
+  colorBlending.logicOp = VK_LOGIC_OP_COPY; // Optional
+  colorBlending.attachmentCount = 1;
+  colorBlending.pAttachments = &colorBlendAttachment;
+  colorBlending.blendConstants[0] = 0.0f; // Optional
+  colorBlending.blendConstants[1] = 0.0f; // Optional
+  colorBlending.blendConstants[2] = 0.0f; // Optional
+  colorBlending.blendConstants[3] = 0.0f; // Optional
+
+  VkDynamicState dynamicStates[] = {
+    VK_DYNAMIC_STATE_VIEWPORT,
+    VK_DYNAMIC_STATE_LINE_WIDTH
+  };
+
+  VkPipelineDynamicStateCreateInfo dynamicState = {};
+  dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  dynamicState.dynamicStateCount = 2;
+  dynamicState.pDynamicStates = dynamicStates;
+
+  VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
+  pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  pipelineLayoutInfo.setLayoutCount = 0; // Optional
+  pipelineLayoutInfo.pSetLayouts = nullptr; // Optional
+  pipelineLayoutInfo.pushConstantRangeCount = 0; // Optional
+  pipelineLayoutInfo.pPushConstantRanges = 0; // Optional
+
+  {
+    VkResult result;
+    if ((result = vkCreatePipelineLayout(data.device, &pipelineLayoutInfo, nullptr, &data.defaultPipelineLayout)) != VK_SUCCESS) {
+
+      std::stringstream errorStringStream;
+      errorStringStream << "Failed to create Vulkan pipeline layout with vk error code: " << result;
+      return {
+        false,
+        kVKFailedToCreateDefaultVulkanPipelineLayout,
+        errorStringStream.str()
+      };
+    }
+  }
+
+  VkGraphicsPipelineCreateInfo pipelineInfo = {};
+  pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  pipelineInfo.stageCount = 2;
+  pipelineInfo.pStages = shaderStages;
+
+  pipelineInfo.pVertexInputState = &vertexInputInfo;
+  pipelineInfo.pInputAssemblyState = &inputAssembly;
+  pipelineInfo.pViewportState = &viewportState;
+  pipelineInfo.pRasterizationState = &rasterizer;
+  pipelineInfo.pMultisampleState = &multisampling;
+  pipelineInfo.pDepthStencilState = nullptr; // Optional
+  pipelineInfo.pColorBlendState = &colorBlending;
+  pipelineInfo.pDynamicState = nullptr; // Optional
+
+  pipelineInfo.layout = data.defaultPipelineLayout;
+
+  pipelineInfo.renderPass = data.defaultRenderPass;
+  pipelineInfo.subpass = 0;
+
+  pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
+  pipelineInfo.basePipelineIndex = -1; // Optional
+
+  {
+    VkResult result;
+    if ((result = vkCreateGraphicsPipelines(data.device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &data.defaultGraphicsPipeline)) != VK_SUCCESS) {
+
+      std::stringstream errorStringStream;
+      errorStringStream << "Failed to create Vulkan graphics pipeline with vk error code: " << result;
+      return {
+        false,
+        kVKFailedToCreateDefaultVulkanGraphicsPipeline,
+        errorStringStream.str()
+      };
+    }
+  }
+
+  return tsk::kTaskSuccess;
+}
+
+tsk::TaskResult taskCreateVulkanDefaultFramebuffers(VulkanSquirrelData &data) {
+  
+  data.swapChainFramebuffers.resize(data.swapChainImageViews.size(), VK_NULL_HANDLE);
+
+  for (size_t i = 0; i < data.swapChainImageViews.size(); i++) {
+    VkImageView attachments[] = {
+      data.swapChainImageViews[i]
+    };
+
+    VkFramebufferCreateInfo framebufferInfo = {};
+    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    framebufferInfo.renderPass = data.defaultRenderPass;
+    framebufferInfo.attachmentCount = 1;
+    framebufferInfo.pAttachments = attachments;
+    framebufferInfo.width = data.swapChainExtent.width;
+    framebufferInfo.height = data.swapChainExtent.height;
+    framebufferInfo.layers = 1;
+
+    VkResult result;
+    if ((result = vkCreateFramebuffer(data.device, &framebufferInfo, nullptr, &data.swapChainFramebuffers[i])) != VK_SUCCESS) {
+
+      std::stringstream errorStringStream;
+      errorStringStream << "Failed to create Vulkan framebuffer with vk error code: " << result;
+      return {
+        false,
+        kVKFailedToCreateDefaultVulkanFramebuffer,
+        errorStringStream.str()
+      };
+    }
+  }
+
+  return tsk::kTaskSuccess;
+}
+
+tsk::TaskResult taskCreateVulkanCommandPool(VulkanSquirrelData &data) {
+
+  VkCommandPoolCreateInfo poolInfo = {};
+  poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+  poolInfo.queueFamilyIndex = data.mainQueueFamilyIndex;
+  poolInfo.flags = 0; // Optional
+
+  VkResult result;
+  if ((result = vkCreateCommandPool(data.device, &poolInfo, nullptr, &data.commandPool)) != VK_SUCCESS) {
+
+    std::stringstream errorStringStream;
+    errorStringStream << "Failed to create Vulkan command pool with vk error code: " << result;
+    return {
+      false,
+      kVKFailedToCreateDefaultVulkanCommandPool,
+      errorStringStream.str()
+    };
+  }
+
+  return tsk::kTaskSuccess;
+}
+
+
+tsk::TaskResult taskCreateVulkanCommandBuffers(VulkanSquirrelData &data) {
+
+  data.commandBuffers.resize(data.swapChainFramebuffers.size());
+
+  VkCommandBufferAllocateInfo allocInfo = {};
+  allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  allocInfo.commandPool = data.commandPool;
+  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  allocInfo.commandBufferCount = (uint32_t)data.commandBuffers.size();
+
+  VkResult result;
+  if ((result = vkAllocateCommandBuffers(data.device, &allocInfo, data.commandBuffers.data())) != VK_SUCCESS) {
+
+    std::stringstream errorStringStream;
+    errorStringStream << "Failed to create Vulkan command buffers with vk error code: " << result;
+    return {
+      false,
+      kVKFailedToCreateDefaultVulkanCommandBuffers,
+      errorStringStream.str()
+    };
+  }
+
+  for (size_t i = 0; i < data.commandBuffers.size(); i++) {
+    VkCommandBufferBeginInfo beginInfo = {};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+    beginInfo.pInheritanceInfo = nullptr; // Optional
+
+    vkBeginCommandBuffer(data.commandBuffers[i], &beginInfo);
+
+    VkRenderPassBeginInfo renderPassInfo = {};
+
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    renderPassInfo.renderPass = data.defaultRenderPass;
+    renderPassInfo.framebuffer = data.swapChainFramebuffers[i];
+    renderPassInfo.renderArea.offset = { 0, 0 };
+    renderPassInfo.renderArea.extent = data.swapChainExtent;
+
+    VkClearValue clearColor = { 0.0f, 0.0f, 0.0f, 1.0f };
+    renderPassInfo.clearValueCount = 1;
+    renderPassInfo.pClearValues = &clearColor;
+
+    vkCmdBeginRenderPass(data.commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(data.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, data.defaultGraphicsPipeline);
+    vkCmdDraw(data.commandBuffers[i], 3, 1, 0, 0);
+    vkCmdEndRenderPass(data.commandBuffers[i]);
+
+    VkResult result;
+    if ((result = vkEndCommandBuffer(data.commandBuffers[i])) != VK_SUCCESS) {
+
+      std::stringstream errorStringStream;
+      errorStringStream << "Failed to create Vulkan command buffer with vk error code: " << result;
+      return {
+        false,
+        kVKFailedToCreateDefaultVulkanCommandBuffer,
+        errorStringStream.str()
+      };
+    }
+  }
+
+  return tsk::kTaskSuccess;
+}
+
+tsk::TaskResult taskCreateVulkanSemaphores(VulkanSquirrelData &data) {
+
+  VkSemaphoreCreateInfo semaphoreInfo = {};
+  semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+  const auto createSemaphore = [&](VkSemaphore &semaphore, tsk::TaskResult &taskResult) -> bool {
+
+    VkResult result;
+    if ((result = vkCreateSemaphore(data.device, &semaphoreInfo, nullptr, &semaphore)) != VK_SUCCESS) {
+
+      std::stringstream errorStringStream;
+      errorStringStream << "Failed to create Vulkan semaphore with vk error code: " << result;
+      taskResult = {
+        false,
+        kVKFailedToCreateDefaultVulkanSemaphore,
+        errorStringStream.str()
+      };
+
+      return false;
+    }
+
+    return true;
+  };
+
+  tsk::TaskResult taskResult;
+
+  if (!createSemaphore(data.imageAvailableSemaphore, taskResult)) {
+    return taskResult;
+  }
+
+  if (!createSemaphore(data.renderFinishedSemaphore, taskResult)) {
+    return taskResult;
+  }
+
   return tsk::kTaskSuccess;
 }
 
@@ -595,8 +1016,26 @@ void VulkanSquirrel::Run(const VulkanSquirrelOptions &options) {
         "Create Vulkan Swap Chain",
         taskCreateVulkanSwapChain
       }, {
+        "Create Vulkan Swap Chain Image Views",
+        taskCreateVulkanSwapChainImageViews
+      }, {
+        "Create Vulkan Render Pass",
+        taskCreateVulkanDefaultRenderPass
+      }, {
         "Create Vulkan Default Pipeline",
         taskCreateVulkanDefaultPipeline
+      }, {
+        "Create Vulkan Default Framebuffers",
+        taskCreateVulkanDefaultFramebuffers
+      }, {
+        "Create Vulkan command pool",
+        taskCreateVulkanCommandPool
+      }, {
+        "Create Vulkan command buffers",
+        taskCreateVulkanCommandBuffers
+      }, {
+        "Create Vulkan semaphores",
+        taskCreateVulkanSemaphores
       }
     }
   );
@@ -604,9 +1043,54 @@ void VulkanSquirrel::Run(const VulkanSquirrelOptions &options) {
   // THE LOOP!
   while (!glfwWindowShouldClose(data.window)) {
     glfwPollEvents();
+
+    uint32_t imageIndex;
+    vkAcquireNextImageKHR(data.device, data.swapChain, std::numeric_limits<uint64_t>::max(), data.imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+
+    VkSubmitInfo submitInfo = {};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+    VkSemaphore waitSemaphores[] = { data.imageAvailableSemaphore };
+    VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+    submitInfo.waitSemaphoreCount = 1;
+    submitInfo.pWaitSemaphores = waitSemaphores;
+    submitInfo.pWaitDstStageMask = waitStages;
+
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &data.commandBuffers[imageIndex];
+
+    VkSemaphore signalSemaphores[] = { data.renderFinishedSemaphore };
+    submitInfo.signalSemaphoreCount = 1;
+    submitInfo.pSignalSemaphores = signalSemaphores;
+
+    VkResult result;
+    if ((result = vkQueueSubmit(data.mainQueue, 1, &submitInfo, VK_NULL_HANDLE)) != VK_SUCCESS) {
+
+      std::cerr << "Failed to submit to Vulkan queue with vk error code: " << result;
+      break;
+    }
+
+    VkPresentInfoKHR presentInfo = {};
+    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+    presentInfo.waitSemaphoreCount = 1;
+    presentInfo.pWaitSemaphores = signalSemaphores;
+
+    VkSwapchainKHR swapChains[] = { data.swapChain };
+    presentInfo.swapchainCount = 1;
+    presentInfo.pSwapchains = swapChains;
+    presentInfo.pImageIndices = &imageIndex;
+
+    presentInfo.pResults = nullptr; // Optional
+
+    vkQueuePresentKHR(data.mainQueue, &presentInfo);
+
+    vkQueueWaitIdle(data.mainQueue);
   } // the loop
 
   if (data.device != VK_NULL_HANDLE) {
+
+    vkDeviceWaitIdle(data.device);
 
     if (data.fragShaderModule != VK_NULL_HANDLE) {
       vkDestroyShaderModule(data.device, data.fragShaderModule, nullptr);
@@ -618,6 +1102,42 @@ void VulkanSquirrel::Run(const VulkanSquirrelOptions &options) {
 
     if (data.swapChain != VK_NULL_HANDLE) {
       vkDestroySwapchainKHR(data.device, data.swapChain, nullptr);
+    }
+
+    for (size_t i = 0; i < data.swapChainFramebuffers.size(); i++) {
+      if (data.swapChainFramebuffers[i] != VK_NULL_HANDLE) {
+        vkDestroyFramebuffer(data.device, data.swapChainFramebuffers[i], nullptr);
+      }
+    }
+
+    for (size_t i = 0; i < data.swapChainImageViews.size(); i++) {
+      if (data.swapChainImageViews[i] != VK_NULL_HANDLE) {
+        vkDestroyImageView(data.device, data.swapChainImageViews[i], nullptr);
+      }
+    }
+
+    if (data.defaultPipelineLayout != VK_NULL_HANDLE) {
+      vkDestroyPipelineLayout(data.device, data.defaultPipelineLayout, nullptr);
+    }
+
+    if (data.defaultRenderPass != VK_NULL_HANDLE) {
+      vkDestroyRenderPass(data.device, data.defaultRenderPass, nullptr);
+    }
+
+    if (data.defaultGraphicsPipeline != VK_NULL_HANDLE) {
+      vkDestroyPipeline(data.device, data.defaultGraphicsPipeline, nullptr);
+    }
+    
+    if (data.commandPool != VK_NULL_HANDLE) {
+      vkDestroyCommandPool(data.device, data.commandPool, nullptr);
+    }
+
+    if (data.renderFinishedSemaphore != VK_NULL_HANDLE) {
+      vkDestroySemaphore(data.device, data.renderFinishedSemaphore, nullptr);
+    }
+
+    if (data.imageAvailableSemaphore != VK_NULL_HANDLE) {
+      vkDestroySemaphore(data.device, data.imageAvailableSemaphore, nullptr);
     }
 
     vkDestroyDevice(data.device, nullptr);

@@ -30,10 +30,19 @@ enum VulkanSquirrelErrorCodes {
   kVKFailedToCreateVulkanLogicalDevice = 2004,
   kVKFailedToCreateSurface = 2005,
   kVKFailedToCreateVulkanSwapChain = 2006,
-  kVKFailedToReadDefaultVulkanVertShader = 2007,
-  kVKFailedToReadDefaultVulkanFragShader = 2008,
-  kVKFailedToCreateDefaultVulkanFragShaderModule = 2009,
-  kVKFailedToCreateDefaultVulkanVertShaderModule = 2010,
+  kVKFailedToCreateVulkanSwapChainImageView = 2007,
+  kVKFailedToReadDefaultVulkanVertShader = 2008,
+  kVKFailedToReadDefaultVulkanFragShader = 2009,
+  kVKFailedToCreateDefaultVulkanFragShaderModule = 2010,
+  kVKFailedToCreateDefaultVulkanVertShaderModule = 2011,
+  kVKFailedToCreateDefaultVulkanRenderPass = 2012,
+  kVKFailedToCreateDefaultVulkanPipelineLayout = 2013,
+  kVKFailedToCreateDefaultVulkanGraphicsPipeline = 2014,
+  kVKFailedToCreateDefaultVulkanFramebuffer = 2015,
+  kVKFailedToCreateDefaultVulkanCommandPool = 2016,
+  kVKFailedToCreateDefaultVulkanCommandBuffers = 2017,
+  kVKFailedToCreateDefaultVulkanCommandBuffer = 2018,
+  kVKFailedToCreateDefaultVulkanSemaphore = 2019,
 };
 
 class VulkanSquirrel
